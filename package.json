@@ -1,0 +1,16 @@
+{
+  "name": "activity-tracking-poc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Demo: employee activity tracking over WebSockets, merged across tabs and devices",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:real": "node -e \"process.env.MODE='real';require('./server.js')\"",
+    "test": "node --test",
+    "loadtest": "node scripts/loadtest.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

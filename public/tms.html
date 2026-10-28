@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Training Management System</title>
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<!-- A pretend second Crizac app. It loads the same tracking script as the console and shares its login. -->
+<body class="console tms" data-app="TMS">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-group">
+        <a class="brand" href="/tms" aria-label="Crizac Training Management System">
+          <img src="crizac-logo.svg" alt="Crizac" width="76" height="40">
+          <span class="brand-product">Training Management System</span>
+        </a>
+        <nav class="app-switch" aria-label="Crizac apps">
+          <a href="/" target="crizac-console">Console</a>
+          <a href="/tms" target="crizac-tms" class="on">TMS</a>
+        </nav>
+      </div>
+      <div id="topbar-user" class="topbar-user" hidden>
+        <span class="seen-as">The server sees you as</span>
+        <span id="me" class="pill">…</span>
+        <span id="avatar" class="avatar" aria-hidden="true"></span>
+        <button id="signout" class="ghost">Log out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section id="login" class="center-card" hidden>
+      <h1>Sign in to TMS</h1>
+      <p class="muted">Choose your account.</p>
+      <div id="people" class="people"></div>
+    </section>
+
+    <section id="app" hidden>
+      <div class="intro">
+        <div>
+          <h1 id="who">TMS</h1>
+          <p class="muted"><span id="device"></span> <span id="connection" class="conn">Connecting…</span></p>
+        </div>
+        <div class="status-picker">
+          <span class="label">Your status</span>
+          <div id="status" class="segmented">
+            <button data-status="">Automatic</button>
+            <button data-status="call">On a call</button>
+            <button data-status="meeting">In a meeting</button>
+            <button data-status="break">On a break</button>
+          </div>
+        </div>
+      </div>
+      <p id="manual-note" class="manual-note" hidden></p>
+
+      <nav class="tabs">
+        <button data-view="apps" class="on">Training modules</button>
+        <button data-view="day">My day</button>
+      </nav>
+
+      <div id="apps-view">
+        <div class="apps">
+          <div class="apps-head" aria-hidden="true">
+            <span>Module</span><span>Title</span><span>Audience and status</span><span></span>
+          </div>
+          <article class="app-row">
+            <span class="app-id">TM-104</span>
+            <span class="app-student">UK student visa: policy update</span>
+            <span class="app-course">All counselling partners<small>Draft</small></span>
+            <div class="actions">
+              <button data-work="Published module TM-104 (UK student visa update)">Publish</button>
+              <button data-work="Edited module TM-104" class="secondary">Edit</button>
+            </div>
+          </article>
+          <article class="app-row">
+            <span class="app-id">TM-097</span>
+            <span class="app-student">Graduate Route refresher</span>
+            <span class="app-course">UK-focused partners<small>Live, quiz open</small></span>
+            <div class="actions">
+              <button data-work="Opened module TM-097">Open</button>
+              <button data-work="Reviewed quiz results for TM-097" class="secondary">Review quiz results</button>
+            </div>
+          </article>
+          <article class="app-row">
+            <span class="app-id">TM-088</span>
+            <span class="app-student">Admission requirements basics</span>
+            <span class="app-course">New partners<small>Live, 3 certifications waiting</small></span>
+            <div class="actions">
+              <button data-work="Opened module TM-088">Open</button>
+              <button data-work="Approved a partner certification for TM-088" class="secondary">Approve certification</button>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <div id="day-view" hidden>
+        <p class="hint">This is exactly what your manager sees about you. Nothing else is recorded.</p>
+        <div class="stats">
+          <div class="stat stat-lead"><span>Activity</span><b id="day-activity">–</b><small>of your time at the computer had mouse or keyboard use</small></div>
+          <div class="stat stat-lead"><span>Work actions</span><b id="day-work">0</b><small>things opened or saved in Crizac's apps</small></div>
+          <div class="stat"><span>At the computer</span><b id="day-computer">0s</b><small>working, active, idle or away</small></div>
+          <div class="stat"><span>Calls and meetings</span><b id="day-calls">0s</b><small>no idle logout during these</small></div>
+          <div class="stat"><span>Breaks</span><b id="day-breaks">0s</b><small>left out of activity %</small></div>
+        </div>
+        <div class="panel">
+          <h2 id="day-chart-title">Activity % per minute</h2>
+          <div id="day-chart" class="day-chart"></div>
+        </div>
+        <div class="day-columns">
+          <div class="panel">
+            <h2>Time in use, by app</h2>
+            <div id="day-apps" class="apps-time"></div>
+            <h2>What you got done</h2>
+            <ul id="day-log" class="worklog"></ul>
+          </div>
+          <div class="panel">
+            <h2>What is measured</h2>
+            <ul class="measured yes">
+              <li><i>When</i> you used the mouse or keyboard, second by second</li>
+              <li>What you opened or saved in Crizac's apps (console, TMS)</li>
+              <li>The status you choose: call, meeting or break</li>
+              <li>Which devices are connected</li>
+            </ul>
+            <h2>What is never measured</h2>
+            <ul class="measured no">
+              <li>What you type or click</li>
+              <li>Screenshots or your screen</li>
+              <li>Websites and apps that aren't Crizac's</li>
+              <li>Camera, microphone or location</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="loggedout" class="center-card" hidden>
+      <h1>You've been logged out</h1>
+      <p id="reason" class="muted"></p>
+      <button id="again">Sign in again</button>
+    </section>
+  </main>
+
+  <div id="warning" class="warning" hidden>
+    <div class="warning-box" role="alertdialog" aria-labelledby="warning-title">
+      <div class="countdown-ring"><b id="countdown">20</b><small>seconds</small></div>
+      <h2 id="warning-title">Are you still there?</h2>
+      <p>You'll be logged out of every tab and device when the countdown ends.</p>
+      <button id="here">I'm still here</button>
+    </div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="shared.js"></script>
+  <script src="console.js"></script>
+</body>
+</html>

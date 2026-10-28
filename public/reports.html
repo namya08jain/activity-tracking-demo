@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Team Reports</title>
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="manager reports">
+  <header class="topbar">
+    <div class="topbar-inner wide">
+      <div class="brand-group">
+        <span class="brand">
+          <img src="crizac-logo.svg" alt="Crizac" width="76" height="40">
+          <span class="brand-product">Team activity</span>
+        </span>
+        <nav class="app-switch" aria-label="Manager views">
+          <a href="/manager">Live</a>
+          <a href="/reports" class="on">Reports</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="page wide">
+    <div class="intro">
+      <div>
+        <h1>Team summary</h1>
+      </div>
+      <div class="report-controls">
+        <div id="ranges" class="segmented" role="group" aria-label="Period">
+          <button data-range="today" class="on">Today</button>
+          <button data-range="yesterday">Yesterday</button>
+          <button data-range="week">Last 7 days</button>
+        </div>
+        <button id="csv" class="secondary">Download CSV</button>
+      </div>
+    </div>
+
+    <div id="team-stats" class="stats report-stats"></div>
+    <p id="sample-note" class="sample-note" hidden>Includes sample days (dashed outline).</p>
+
+    <div class="team report-table">
+      <div class="report-head" aria-hidden="true">
+        <span>Employee</span>
+        <span>At the computer</span>
+        <span>Activity</span>
+        <span>Work actions</span>
+        <span>Calls and meetings</span>
+        <span>Breaks</span>
+        <span>Time by app</span>
+        <span id="hours-head">First in, last seen</span>
+        <span>Flags</span>
+      </div>
+      <div id="report-rows"></div>
+    </div>
+
+    <div class="demo-box">
+      <b>Sample data</b>
+      <div class="demo-actions">
+        <button id="sample-add" class="secondary">Add sample week</button>
+        <button id="sample-remove" class="ghost">Remove sample week</button>
+        <span id="sample-message" class="muted small"></span>
+      </div>
+    </div>
+  </main>
+  <script src="shared.js"></script>
+  <script src="reports.js"></script>
+</body>
+</html>

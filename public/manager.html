@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Team Activity</title>
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="manager">
+  <header class="topbar">
+    <div class="topbar-inner wide">
+      <div class="brand-group">
+        <span class="brand">
+          <img src="crizac-logo.svg" alt="Crizac" width="76" height="40">
+          <span class="brand-product">Team activity</span>
+        </span>
+        <nav class="app-switch" aria-label="Manager views">
+          <a href="/manager" class="on">Live</a>
+          <a href="/reports">Reports</a>
+        </nav>
+      </div>
+      <div class="topbar-right">
+        <div id="clocks" class="clocks"></div>
+        <span id="live" class="live off">Live</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="page wide">
+    <div class="intro">
+      <div>
+        <h1>Who's working right now</h1>
+      </div>
+    </div>
+
+    <div id="summary" class="summary" aria-label="How many people are in each status"></div>
+
+    <div class="team">
+      <div class="team-head" aria-hidden="true">
+        <span>Employee</span>
+        <span>Status now</span>
+        <span>Devices</span>
+        <span id="timeline-head">Last 10 minutes</span>
+        <span>Today</span>
+      </div>
+      <div id="rows"></div>
+    </div>
+
+    <p id="server" class="server"></p>
+  </main>
+  <script src="shared.js"></script>
+  <script src="manager.js"></script>
+</body>
+</html>
