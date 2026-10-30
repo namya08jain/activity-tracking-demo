@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Laptop</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="desktop.css">
+</head>
+<body>
+  <div id="screen" class="screen">
+    <div class="wallpaper"></div>
+
+    <section id="lock" class="lock" hidden>
+      <div class="lock-clock"><b id="lock-time"></b><span id="lock-date"></span></div>
+      <div class="corner-glyphs"><span class="glyph">&#xE701;</span><span class="glyph">&#xE83F;</span></div>
+    </section>
+
+    <section id="signin" class="signin" hidden>
+      <div class="signin-main">
+        <span id="signin-avatar" class="avatar huge"></span>
+        <b id="signin-name"></b>
+        <button id="signin-button" class="signin-button">Sign in</button>
+      </div>
+      <div id="users" class="user-list"></div>
+      <div class="corner-glyphs"><span class="glyph">&#xE701;</span><span class="glyph">&#xE776;</span><span class="glyph">&#xE7E8;</span></div>
+    </section>
+
+    <section id="desktop" class="desktop" hidden>
+      <div id="windows" class="windows"></div>
+
+      <div id="start" class="start-menu" hidden>
+        <div class="start-search"><span class="glyph">&#xE721;</span><span>Search for apps, settings, and documents</span></div>
+        <div class="start-head"><b>Pinned</b><span class="pill-button">All<span class="glyph">&#xE76C;</span></span></div>
+        <div id="start-apps" class="start-grid"></div>
+        <div class="start-head"><b>Recommended</b><span class="pill-button">More<span class="glyph">&#xE76C;</span></span></div>
+        <div id="start-recent" class="start-recent"></div>
+        <div class="start-foot">
+          <div class="menu-anchor">
+            <button id="user-button" class="start-user"><span id="start-avatar" class="avatar small"></span><span id="start-name"></span></button>
+            <div id="user-menu" class="context-menu up left" hidden>
+              <button data-action="lock"><span class="glyph">&#xE72E;</span>Lock</button>
+              <button data-action="signout"><span class="glyph">&#xF3B1;</span>Sign out</button>
+            </div>
+          </div>
+          <div class="menu-anchor">
+            <button id="power-button" class="icon-button" title="Power"><span class="glyph">&#xE7E8;</span></button>
+            <div id="power-menu" class="context-menu up right" hidden>
+              <button data-action="sleep"><span class="glyph">&#xE708;</span>Sleep</button>
+              <button data-action="shutdown"><span class="glyph">&#xE7E8;</span>Shut down</button>
+              <button data-action="restart"><span class="glyph">&#xE777;</span>Restart</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="toasts" class="toasts" aria-live="polite"></div>
+
+      <footer class="taskbar">
+        <div class="widgets"><span class="weather">🌤️</span><span class="widgets-text"><b>27°C</b><span>Partly sunny</span></span></div>
+        <div class="taskbar-center">
+          <button id="start-button" class="task-button" title="Start"><svg class="win-logo" viewBox="0 0 24 24"><defs><linearGradient id="winlogo" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4fc3f7"/><stop offset="1" stop-color="#0063d1"/></linearGradient></defs><path fill="url(#winlogo)" d="M1 1h10.6v10.6H1zM12.4 1H23v10.6H12.4zM1 12.4h10.6V23H1zM12.4 12.4H23V23H12.4z"/></svg></button>
+          <div class="task-search"><span class="glyph">&#xE721;</span><span>Search</span></div>
+          <button class="task-button task-view" title="Task view"><span class="glyph">&#xE7C4;</span></button>
+          <div id="task-apps" class="task-apps"></div>
+        </div>
+        <div class="tray">
+          <button class="tray-button hide-narrow" title="Show hidden icons"><span class="glyph small">&#xE70E;</span></button>
+          <button id="jiggler" class="tray-button" title="USB mouse jiggler"><span class="glyph">&#xE88E;</span></button>
+          <span id="mic" class="tray-button mic" title="Microphone in use" hidden><span class="glyph">&#xE720;</span></span>
+          <button id="tray-app" class="tray-button" title="Crizac Activity"><span class="tray-logo">C</span></button>
+          <button class="tray-group" title="Quick settings"><span class="glyph">&#xE701;</span><span class="glyph hide-narrow">&#xE767;</span><span class="glyph">&#xE83F;</span></button>
+          <button class="tray-group clock"><span id="clock-time"></span><span id="clock-date"></span></button>
+          <span class="show-desktop"></span>
+        </div>
+      </footer>
+    </section>
+
+    <section id="black" class="black" hidden><span id="black-text"></span></section>
+
+    <div id="dialog" class="dialog-backdrop" hidden>
+      <div class="dialog" role="dialog">
+        <div class="dialog-titlebar"><img src="icon-taskmgr.png" alt=""><span>Task Manager</span></div>
+        <div class="dialog-body"><b id="dialog-title"></b><p id="dialog-text"></p></div>
+        <div class="dialog-foot"><button id="dialog-ok" class="accent-button">OK</button></div>
+      </div>
+    </div>
+  </div>
+  <script src="shared.js"></script>
+  <script src="desktop.js"></script>
+</body>
+</html>

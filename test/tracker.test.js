@@ -387,3 +387,199 @@ test('load-test bots keep no daily records', () => {
   assert.equal(tracker.users.get('bot-1').days.size, 0);
   assert.deepEqual(Object.keys(tracker.exportDays().days), ['ananya']);
 });
+
+// The desktop app: one connection per laptop that reports the program in front, the screen lock and the microphone.
+function desktopSetup() {
+  const result = setup();
+  result.tracker.connect('desk', result.token, { deviceId: 'laptop', deviceLabel: 'Laptop · Desktop app', kind: 'desktop' });
+  return result;
+}
+const beat = (tracker, second, report) => tracker.heartbeat('desk', { visible: true, secondsSinceInput: 0, ...report }, at(second));
+
+test('desktop app: the program in front is credited from a fixed list; websites only count when a browser is in front', () => {
+  const { tracker } = desktopSetup();
+  for (let s = 1; s <= 5; s++) { beat(tracker, s, { app: 'EXCEL.EXE' }); tracker.tick(at(s)); }
+  for (let s = 6; s <= 10; s++) { beat(tracker, s, { app: 'chrome.exe', site: 'University portal' }); tracker.tick(at(s)); }
+  for (let s = 11; s <= 13; s++) { beat(tracker, s, { app: 'game.exe', site: 'Console' }); tracker.tick(at(s)); }
+  beat(tracker, 14, { app: '__proto__', site: 'Made up' });
+  tracker.tick(at(14));
+  const [row] = tracker.snapshot(at(14)).employees;
+  assert.deepEqual(row.apps.map(app => app.name).sort(), ['Excel', 'Other app', 'University portal']);
+  assert.deepEqual(row.devices, [{ label: 'Laptop · Desktop app', tabs: 1, apps: ['Other app'], desktop: true }]);
+});
+
+test('desktop app: a locked screen means Away at once, and input on any device brings the person back', () => {
+  const { tracker, token } = desktopSetup();
+  tracker.connect('phone', token, { deviceId: 'phone', deviceLabel: 'Phone · Chrome' });
+  beat(tracker, 1, { app: 'excel.exe' });
+  tracker.tick(at(1));
+  assert.equal(tracker.snapshot(at(1)).employees[0].state, 'active');
+  beat(tracker, 2, { app: 'lockapp.exe', locked: true, secondsSinceInput: 1 });
+  tracker.tick(at(2));
+  let [row] = tracker.snapshot(at(2)).employees;
+  assert.equal(row.state, 'away');
+  assert.equal(row.devices.find(device => device.desktop).locked, true);
+  tracker.input('phone', at(5));
+  tracker.tick(at(5));
+  assert.equal(tracker.snapshot(at(5)).employees[0].state, 'active');
+  beat(tracker, 6, { app: 'excel.exe', locked: false });
+  [row] = tracker.snapshot(at(6)).employees;
+  assert.equal(row.devices.find(device => device.desktop).locked, undefined);
+});
+
+test('desktop app: while the screen is locked, its rounded "seconds since input" never brings the person back', () => {
+  const { tracker, user } = desktopSetup();
+  beat(tracker, 1, { app: 'excel.exe' });
+  beat(tracker, 2, { app: 'lockapp.exe', locked: true, secondsSinceInput: 0 });
+  // A second later the app says "1s ago": rounded down, that would be after the lock.
+  tracker.heartbeat('desk', { visible: false, secondsSinceInput: 1, app: 'lockapp.exe', locked: true }, at(3.4));
+  tracker.input('desk', at(4));
+  tracker.tick(at(4));
+  assert.equal(tracker.stateOf(user, at(4)), 'away');
+});
+
+test('desktop app: a call app using the microphone switches to On a call and back, with no time limit', () => {
+  const { tracker, user } = desktopSetup();
+  beat(tracker, 1, { app: 'excel.exe', micApps: ['notepad.exe'] });
+  assert.equal(user.manual, null, 'a mic used by a non-call app is not a call');
+  beat(tracker, 2, { app: 'excel.exe', micApps: ['ms-teams.exe'] });
+  const later = 2 + config.manualMax + 30;
+  run(tracker, 2, later);
+  let [row] = tracker.snapshot(at(later)).employees;
+  assert.equal(row.state, 'call');
+  assert.deepEqual({ detected: row.manual.detected, app: row.manual.app, endsIn: row.manual.endsIn }, { detected: true, app: 'Teams', endsIn: null });
+  assert.equal(row.secondsUntilLogout, null, 'no idle logout during a call');
+  beat(tracker, later + 1, { app: 'excel.exe', micApps: [] });
+  tracker.tick(at(later + 1));
+  [row] = tracker.snapshot(at(later + 1)).employees;
+  assert.equal(row.state, 'working', 'a finished call is work done');
+  assert.equal(row.workCount, 1);
+  assert.equal(row.lastWork, 'Call in Teams, 4 min');
+  assert.equal(row.secondsUntilLogout, config.idleLogout, 'the idle clock restarts when the call ends');
+});
+
+test('desktop app: a call shorter than 20 seconds is not counted as a work action', () => {
+  const { tracker, user } = desktopSetup();
+  beat(tracker, 1, { app: 'zoom.exe', micApps: ['zoom.exe'] });
+  beat(tracker, 11, { app: 'zoom.exe', micApps: [] });
+  assert.equal(user.manual, null);
+  assert.equal(tracker.report('today', at(11)).employees[0].work, 0);
+});
+
+test('desktop app: a status chosen by hand wins over the microphone, and a detected call ends if the app disappears', () => {
+  const { tracker, token, user } = desktopSetup();
+  tracker.connect('tab', token, { deviceId: 'laptop', deviceLabel: 'Computer · Chrome' });
+  tracker.setStatus('tab', 'break', at(1));
+  beat(tracker, 2, { app: 'zoom.exe', micApps: ['zoom.exe'] });
+  assert.equal(user.manual.kind, 'break');
+  tracker.setStatus('tab', 'auto', at(3));
+  beat(tracker, 4, { app: 'zoom.exe', micApps: ['zoom.exe'] });
+  assert.equal(user.manual.auto, true);
+  tracker.connectionLost('desk', at(5));
+  tracker.tick(at(6));
+  assert.equal(user.manual, null);
+});
+
+test('desktop app: going silent without saying goodbye flags "tracker stopped"; sleep does not; coming back clears it', () => {
+  const { tracker, token, user } = desktopSetup();
+  beat(tracker, 1, { app: 'excel.exe' });
+  tracker.goodbye('desk', 'sleep');
+  tracker.connectionLost('desk', at(2));
+  assert.equal(user.trackerStopped, null);
+
+  tracker.connect('desk', token, { deviceId: 'laptop', deviceLabel: 'Laptop · Desktop app', kind: 'desktop' });
+  tracker.goodbye('desk', 'made up reason');
+  tracker.connectionLost('desk', at(3));
+  assert.deepEqual(user.trackerStopped, { since: at(3), device: 'Laptop · Desktop app' });
+  assert.equal(tracker.report('today', at(3)).employees[0].flagged.trackerStops, 1);
+  assert.equal(tracker.report('today', at(3)).team.flaggedPeople, 1);
+
+  tracker.connect('desk', token, { deviceId: 'laptop', deviceLabel: 'Laptop · Desktop app', kind: 'desktop' });
+  assert.equal(user.trackerStopped, null);
+  // A logout closes every connection on purpose: that isn't a stopped tracker.
+  tracker.logout('ananya', 'signed out');
+  tracker.connectionLost('desk', at(4));
+  assert.equal(user.trackerStopped, null);
+  assert.equal(tracker.report('today', at(4)).employees[0].flagged.trackerStops, 1);
+});
+
+test('desktop app: "you were away, what was it?" moves away time into a break, meeting or call', () => {
+  const { tracker, user } = desktopSetup();
+  beat(tracker, 1, { app: 'excel.exe' });
+  beat(tracker, 2, { app: 'lockapp.exe', locked: true, secondsSinceInput: 1 });
+  run(tracker, 2, 31);  // 30 seconds locked = Away
+  // While still away, nothing can be answered: only a finished spell can.
+  assert.equal(tracker.explainAway('desk', 'meeting', 20, at(31)), false);
+  // Back, and answering before the server's next tick has noticed: still accepted.
+  beat(tracker, 32, { app: 'excel.exe', locked: false });
+  const before = tracker.report('today', at(32)).employees[0];
+  assert.equal(tracker.explainAway('desk', 'meeting', 30, at(33)), true);
+  const after = tracker.report('today', at(33)).employees[0];
+  assert.equal(after.callsAndMeetings - before.callsAndMeetings, 30);
+  assert.equal(after.atComputer, before.atComputer - 30, 'the away time is moved, not added on top');
+  assert.equal(after.work, before.work + 1, 'a meeting away from the desk is work done');
+  assert.equal(user.lastWork, 'Meeting away from the desk, 30 s');
+
+  // Answering twice for the same spell is refused; so are unknown answers and nonsense.
+  assert.equal(tracker.explainAway('desk', 'break', 30, at(34)), false);
+  assert.equal(tracker.explainAway('desk', 'lunch', 1, at(40)), false);
+  assert.equal(tracker.explainAway('desk', 'break', 'x', at(40)), false);
+  // A new spell can be explained, but never for longer than the server saw it.
+  run(tracker, 34, 40);
+  beat(tracker, 41, { app: 'lockapp.exe', locked: true, secondsSinceInput: 9 });
+  run(tracker, 41, 46);
+  beat(tracker, 47, { app: 'excel.exe', locked: false });
+  tracker.input('desk', at(47));
+  run(tracker, 47, 48);
+  assert.equal(tracker.explainAway('desk', 'break', 3600, at(48)), true);
+  assert.equal(tracker.report('today', at(48)).employees[0].breaks, 6);
+});
+
+test('desktop app: a tampered app can\'t invent a meeting the server never saw', () => {
+  const { tracker } = desktopSetup();
+  for (let second = 1; second <= 20; second++) {
+    beat(tracker, second, { app: 'excel.exe' });
+    tracker.tick(at(second));
+  }
+  assert.equal(tracker.explainAway('desk', 'meeting', 600, at(21)), false, 'never away: nothing to explain');
+  assert.equal(tracker.report('today', at(21)).employees[0].callsAndMeetings, 0);
+});
+
+test('desktop app: a spell longer than the limit (a night away) can\'t be explained, nor can an answer that comes too late', () => {
+  const short = { ...config, idleLogout: 10_000, awayLimit: 60, awayAnswerWindow: 30 };
+  const tracker = new ActivityTracker(short, employees);
+  const token = tracker.login('ananya', at(0));
+  tracker.connect('desk', token, { deviceId: 'laptop', kind: 'desktop' });
+  const lockFor = (from, to) => {
+    tracker.heartbeat('desk', { visible: false, secondsSinceInput: 0, app: 'lockapp.exe', locked: true }, at(from));
+    run(tracker, from, to);
+    tracker.heartbeat('desk', { visible: true, secondsSinceInput: 0, app: 'excel.exe', locked: false }, at(to + 1));
+    tracker.input('desk', at(to + 1));
+    tracker.tick(at(to + 1));
+  };
+  lockFor(1, 120);  // 2 minutes away, over the 1-minute limit
+  assert.equal(tracker.explainAway('desk', 'meeting', 120, at(122)), false);
+  lockFor(130, 150);  // 20 seconds away, then 40 seconds back at work before answering: too late
+  for (let second = 152; second <= 190; second++) {
+    tracker.input('desk', at(second));
+    tracker.tick(at(second));
+  }
+  assert.equal(tracker.explainAway('desk', 'break', 20, at(191)), false);
+  lockFor(200, 220);  // 20 seconds away, answered straight away: accepted
+  assert.equal(tracker.explainAway('desk', 'break', 20, at(222)), true);
+  const row = tracker.report('today', at(222)).employees[0];
+  assert.deepEqual({ callsAndMeetings: row.callsAndMeetings, breaks: row.breaks }, { callsAndMeetings: 0, breaks: 20 });
+});
+
+test('desktop app: only a desktop app can explain away time', () => {
+  const { tracker, token } = setup();
+  tracker.connect('tab', token, { deviceId: 'laptop' });
+  assert.equal(tracker.explainAway('tab', 'break', 10, at(100)), false);
+});
+
+test('desktop app names survive a restart; anything else in a saved file is still dropped', () => {
+  const saved = { days: { ananya: { '2026-10-26': { working: 5000, trackerStops: 2, apps: { Teams: 3000, 'University portal': 2000, Fake: 9 } } } } };
+  const day = new ActivityTracker(config, employees, saved).users.get('ananya').days.get('2026-10-26');
+  assert.deepEqual(day.apps, { Teams: 3000, 'University portal': 2000 });
+  assert.equal(day.trackerStops, 2);
+});

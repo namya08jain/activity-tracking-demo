@@ -31,27 +31,71 @@
   </header>
 
   <main class="page wide">
-    <div class="intro">
+    <div class="mgr-top">
       <div>
         <h1>Who's working right now</h1>
+        <p id="headcount" class="muted"></p>
+      </div>
+      <div class="mgr-tools">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <input id="search" type="search" placeholder="Search by name" autocomplete="off" aria-label="Search by name">
+        </label>
+        <select id="team-select" aria-label="Team"></select>
+        <select id="office-select" aria-label="Office"></select>
       </div>
     </div>
 
-    <div id="summary" class="summary" aria-label="How many people are in each status"></div>
+    <div id="summary" class="summary status-filters" aria-label="Filter by status"></div>
 
-    <div class="team">
-      <div class="team-head" aria-hidden="true">
-        <span>Employee</span>
-        <span>Status now</span>
-        <span>Devices</span>
-        <span id="timeline-head">Last 10 minutes</span>
-        <span>Today</span>
-      </div>
-      <div id="rows"></div>
+    <div class="mgr-body">
+      <aside class="team-list" aria-label="Teams">
+        <h2>Teams</h2>
+        <div id="teams"></div>
+      </aside>
+
+      <section class="people-panel" aria-label="People">
+        <div class="people-head">
+          <h2 id="people-title">Everyone</h2>
+          <label class="sort">
+            <span>Sort</span>
+            <select id="sort" aria-label="Sort">
+              <option value="attention">Needs a look first</option>
+              <option value="name">Name</option>
+              <option value="status">Status</option>
+              <option value="activity">Lowest activity</option>
+              <option value="work">Most work done</option>
+              <option value="longest">Longest in status</option>
+            </select>
+          </label>
+        </div>
+        <div class="people-table">
+          <div class="people-row people-columns" aria-hidden="true">
+            <span>Name</span><span class="col-team">Team</span><span>Status</span><span class="col-app">In use</span>
+            <span class="col-activity">Activity today</span><span class="col-work">Work</span><span class="col-flags">Flags</span>
+          </div>
+          <div id="scroller" class="scroller">
+            <div id="spacer" class="spacer"></div>
+          </div>
+        </div>
+      </section>
     </div>
 
+    <div class="demo-box">
+      <b>Sample data</b>
+      <div class="demo-actions"><button id="sample-people" class="secondary"></button></div>
+    </div>
     <p id="server" class="server"></p>
   </main>
+
+  <aside id="drawer" class="drawer" hidden aria-label="Person details">
+    <div class="drawer-head">
+      <div id="drawer-person" class="drawer-person"></div>
+      <button id="drawer-close" class="ghost" aria-label="Close">✕</button>
+    </div>
+    <div id="drawer-body" class="drawer-body"></div>
+  </aside>
+
   <script src="shared.js"></script>
   <script src="manager.js"></script>
 </body>

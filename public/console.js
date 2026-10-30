@@ -187,8 +187,9 @@ function showStatus({ state, manualEndsIn }) {
   $('manual-note').hidden = !manual;
   if (manual) {
     $('manual-note').className = `manual-note ${manual}`;
+    // A call detected by the desktop app has no end time: it ends when the microphone is free again.
     $('manual-note').textContent = `You're marked "${STATE_LABELS[manual]}". There's no idle logout and this time is left out of your activity %. `
-      + `It goes back to Automatic by itself in ${duration(manualEndsIn)}, or click Automatic when you're done.`;
+      + (typeof manualEndsIn === 'number' ? `It goes back to Automatic by itself in ${duration(manualEndsIn)}, or click Automatic when you're done.` : 'It ends when the call ends.');
   }
 }
 

@@ -14,10 +14,11 @@ function hoursText(row) {
 
 function flagsCell(row) {
   const cell = el('div', 'cell report-flags');
-  const { noWork, regular } = row.flagged;
-  if (!noWork && !regular) cell.append(el('span', 'muted', 'None'));
+  const { noWork, regular, trackerStops } = row.flagged;
+  if (!noWork && !regular && !trackerStops) cell.append(el('span', 'muted', 'None'));
   if (noWork) cell.append(el('div', 'flag', `⚑ Nothing saved for ${roundDuration(noWork)}`));
   if (regular) cell.append(el('div', 'flag', `⚑ Too regular for ${roundDuration(regular)}`));
+  if (trackerStops) cell.append(el('div', 'flag', `⚑ Desktop app stopped ${trackerStops === 1 ? 'once' : `${trackerStops} times`}`));
   return cell;
 }
 

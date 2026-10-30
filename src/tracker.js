@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const { dayKey, shiftDay, startOfDay, weekday } = require('./days');
+const { DESKTOP_APP_NAMES, desktopActivity, callApp } = require('./apps');
 
 const MAX_BOTS = 10_000;
 const MAX_TOKENS_PER_USER = 20;
@@ -11,10 +12,21 @@ const MAX_GAPS = 200;
 // Crizac apps that load the tracking script. A tab's claim is checked against this list, so a tampered tab
 // can't invent app names (unbounded memory) or use names like "__proto__".
 const KNOWN_APPS = new Set(['Console', 'TMS']);
+// Every app name a daily record may hold: the Crizac web apps plus the fixed list the desktop app can report.
+const RECORDED_APPS = new Set([...KNOWN_APPS, ...DESKTOP_APP_NAMES]);
+// Ordinary reasons a desktop app goes quiet; any other silence is flagged as "tracker stopped".
+const GOODBYES = new Set(['sleep', 'shutdown', 'signout']);
+// A detected call shorter than config.minCall (a microphone test, a missed call) isn't counted as a work action.
+const MIN_CALL_SECONDS = 20;
+const callLength = seconds => (seconds < 60 ? `${seconds} s` : `${Math.round(seconds / 60)} min`);
+// Answers to the desktop app's "you were away, what was it?" question, and the statuses that make up an away spell.
+const AWAY_ANSWERS = { break: 'Break', meeting: 'Meeting', call: 'Call' };
+const AWAY_STATES = new Set(['away', 'idle', 'logged_out']);
 
 // One record per employee per local date: what the daily and weekly reports are built from, and what is saved
-// to disk. Times are milliseconds; activeSeconds counts seconds with any input; flags count flagged milliseconds.
-const DAY_FIELDS = [...STATES, 'activeSeconds', 'work', 'firstSeen', 'lastSeen', 'noWorkFlag', 'regularFlag'];
+// to disk. Times are milliseconds; activeSeconds counts seconds with any input; flags count flagged milliseconds;
+// trackerStops counts times the desktop app went silent unexpectedly.
+const DAY_FIELDS = [...STATES, 'activeSeconds', 'work', 'firstSeen', 'lastSeen', 'noWorkFlag', 'regularFlag', 'trackerStops'];
 const MAX_DAY_LOG = 100;  // work actions listed per day ("What you got done")
 const KEEP_DAYS = 35;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -32,14 +44,14 @@ function cleanDay(saved) {
   const day = emptyDay();
   if (!saved || typeof saved !== 'object') return day;
   for (const field of DAY_FIELDS) if (Number.isFinite(saved[field]) && saved[field] >= 0) day[field] = saved[field];
-  for (const app of KNOWN_APPS) {
+  for (const app of RECORDED_APPS) {
     const ms = saved.apps && Object.hasOwn(saved.apps, app) ? saved.apps[app] : undefined;
     if (Number.isFinite(ms) && ms >= 0) day.apps[app] = ms;
   }
   if (Array.isArray(saved.log)) {
     day.log = saved.log.slice(-MAX_DAY_LOG)
       .filter(item => item && Number.isFinite(item.at))
-      .map(item => ({ at: item.at, label: String(item.label ?? '').slice(0, 80), app: KNOWN_APPS.has(item.app) ? item.app : 'Console' }));
+      .map(item => ({ at: item.at, label: String(item.label ?? '').slice(0, 80), app: RECORDED_APPS.has(item.app) ? item.app : 'Console' }));
   }
   day.sample = saved.sample === true;
   return day;
@@ -109,9 +121,10 @@ class ActivityTracker {
     }
   }
 
-  addUser({ id, name, office = '', timeZone = 'UTC', bot = false }) {
+  addUser({ id, name, office = '', timeZone = 'UTC', team = '', bot = false }) {
     const user = {
-      id, name, office, timeZone, bot,
+      id, name, office, timeZone, team, bot,
+      lastState: null, stateSince: 0,  // the status at the last tick, and since when
       tokens: new Set(), conns: new Set(),
       loggedIn: false, loginAt: 0, lastInputAt: 0, lastWorkAt: 0, lastWork: null,
       warned: false, logoutReason: null, lastTick: 0,
@@ -126,7 +139,11 @@ class ActivityTracker {
       // Which Crizac app (console, TMS…) had the latest input. Time in use is credited to it, so two apps
       // open at once still count once.
       lastApp: null, lastWorkApp: null,
-      gaps: []            // { at, ms }: time between bursts of input, to spot a mouse jiggler
+      gaps: [],           // { at, ms }: time between bursts of input, to spot a mouse jiggler
+      trackerStopped: null, // { since, device }: the desktop app went silent without the laptop going to sleep
+      // Away spells the server saw itself (Away, Idle or logged out after being here), in ms: the one going on now,
+      // and the last one that ended. Only these can be explained (see explainAway).
+      awaySpell: 0, lastAwaySpell: 0, lastAwayEnd: 0
     };
     this.users.set(id, user);
     return user;
@@ -166,27 +183,53 @@ class ActivityTracker {
     user.loggedIn = false;
     user.logoutReason = reason;
     user.manual = null;
+    user.trackerStopped = null;
     for (const token of user.tokens) this.tokens.delete(token);
     user.tokens.clear();
     return [...user.conns];
   }
 
   // `app` is the Crizac web app the tab belongs to ("Console", "TMS"…); each app loads the same tracking script.
-  connect(connId, token, { deviceId, deviceLabel, tabId, app } = {}) {
+  // `kind: 'desktop'` is the desktop app, which sees the whole laptop: its heartbeats say which program is in
+  // front (so `app` changes as the person switches), whether the screen is locked, and who is using the microphone.
+  connect(connId, token, { deviceId, deviceLabel, tabId, app, kind } = {}) {
     const user = this.users.get(this.tokens.get(token));
     if (!user || !user.loggedIn) return null;
     // A connection belongs to one employee; binding it again first unbinds the old one.
     this.disconnect(connId);
+    const desktop = kind === 'desktop';
     this.connections.set(connId, {
       userId: user.id,
       deviceId: String(deviceId || connId).slice(0, 64),
       deviceLabel: String(deviceLabel || 'Unknown device').slice(0, 40),
       tabId: String(tabId || connId).slice(0, 64),
-      app: KNOWN_APPS.has(app) ? app : 'Console',
-      visible: true
+      app: desktop ? null : KNOWN_APPS.has(app) ? app : 'Console',
+      visible: true,
+      desktop,
+      lockedAt: 0,    // when the desktop app first reported the screen locked
+      goodbye: null   // why the desktop app said it was going (sleep, shutdown, signout)
     });
     user.conns.add(connId);
+    if (desktop) user.trackerStopped = null;
     return user;
+  }
+
+  // A desktop app announcing an ordinary reason for going quiet, just before it does.
+  goodbye(connId, reason) {
+    const conn = this.connections.get(connId);
+    if (conn?.desktop && GOODBYES.has(reason)) conn.goodbye = reason;
+  }
+
+  // A connection closed. A desktop app that went silent without saying goodbye was closed, stopped or cut off,
+  // so the manager sees "tracker stopped" until a desktop app is back for that person.
+  connectionLost(connId, now) {
+    const conn = this.connections.get(connId);
+    const user = this.userOf(connId);
+    this.disconnect(connId);
+    if (!conn?.desktop || conn.goodbye || !user?.loggedIn || user.bot) return;
+    if ([...user.conns].some(id => this.connections.get(id)?.desktop)) return;
+    user.trackerStopped = { since: now, device: conn.deviceLabel };
+    this.dayOf(user, now).trackerStops++;
   }
 
   disconnect(connId) {
@@ -205,13 +248,18 @@ class ActivityTracker {
   // - secondsSinceInput: how long since the last mouse/keyboard input
   // - inputSeconds: which of the last few seconds had any input, as "seconds ago" (never what the input was)
   // - gaps: milliseconds between bursts of input since the last report
-  heartbeat(connId, { visible, secondsSinceInput, inputSeconds, gaps }, now) {
+  // A desktop app's heartbeat also carries `app`, `site`, `locked` and `micApps` (see desktopReport).
+  heartbeat(connId, report, now) {
+    const { visible, secondsSinceInput, inputSeconds, gaps } = report ?? {};
     const conn = this.connections.get(connId);
     const user = this.userOf(connId);
     if (!conn || !user?.loggedIn) return;
     conn.visible = Boolean(visible);
+    if (conn.desktop) this.desktopReport(connId, conn, user, report ?? {}, now);
+    // While its screen is locked a desktop app's "seconds since input" is ignored: rounded to whole seconds, it
+    // could otherwise place the last input just after the lock and bring the person back.
     const seconds = Number(secondsSinceInput);
-    if (Number.isFinite(seconds) && seconds >= 0) this.noteInput(user, now - seconds * 1000, conn.app);
+    if (Number.isFinite(seconds) && seconds >= 0 && !conn.lockedAt) this.noteInput(user, now - seconds * 1000, conn.app);
 
     if (Array.isArray(inputSeconds)) {
       const nowSecond = Math.floor(now / 1000);
@@ -227,10 +275,70 @@ class ActivityTracker {
     }
   }
 
+  // What only the desktop app can see:
+  // - app: the program in front, as its file name ("chrome.exe"), turned into a name from a fixed list;
+  //   site: a Crizac app or work website the laptop recognised from the browser's window title
+  // - locked: the screen is locked, so the person is Away until there's input again anywhere
+  // - micApps: the programs using the microphone. A call app among them means "On a call", switched on and off
+  //   automatically; a status the person chose by hand is left alone.
+  desktopReport(connId, conn, user, { app, site, locked, micApps }, now) {
+    conn.app = desktopActivity(app, site);
+    if (locked !== true) conn.lockedAt = 0;
+    else if (!conn.lockedAt) conn.lockedAt = now;
+    const call = callApp(micApps);
+    if (call && !user.manual) user.manual = { kind: 'call', since: now, auto: true, connId, app: call };
+    else if (call && user.manual.auto) user.manual.app = call;
+    else if (!call && user.manual?.auto && user.manual.connId === connId) {
+      // A finished call is work done: it goes in the day's work actions like a saved note.
+      const { since, app: callIn } = user.manual;
+      this.endManual(user, now);
+      const seconds = Math.round((now - since) / 1000);
+      if (seconds >= (this.config.minCall ?? MIN_CALL_SECONDS)) this.recordWork(user, `Call in ${callIn}, ${callLength(seconds)}`, callIn, now);
+    }
+  }
+
+  // The desktop app asks "you were away 25 min, what was it?" when someone comes back. The answer moves that time out
+  // of Away (then Idle) into a break, meeting or call; time not recorded at all (logged out meanwhile) is added.
+  // A meeting or call away from the desk also counts as work done. The server only accepts an answer for an away
+  // spell it saw itself and that has ended (the person is back) within config.awayAnswerWindow; once; for no more
+  // than it lasted; and never for a spell longer than config.awayLimit (a night away is time off, not a meeting).
+  // A spell still going on can't be answered, so it can't be explained away in small pieces either.
+  explainAway(connId, kind, seconds, now) {
+    const user = this.userOf(connId);
+    const conn = this.connections.get(connId);
+    if (!user?.loggedIn || user.bot || !conn?.desktop || !Object.hasOwn(AWAY_ANSWERS, kind)) return false;
+    // Back already (an answer can arrive before the next tick notices): the spell ends now.
+    if (!AWAY_STATES.has(this.stateOf(user, now))) this.endAwaySpell(user, now);
+    const recent = now - user.lastAwayEnd <= (this.config.awayAnswerWindow ?? 900) * 1000;
+    const seen = recent ? user.lastAwaySpell : 0;
+    if (seen > (this.config.awayLimit ?? 4 * 3600) * 1000) return false;
+    const ms = Math.min(Math.round(Number(seconds) * 1000), seen);
+    if (!Number.isFinite(ms) || ms < 1000) return false;
+    user.lastAwaySpell = 0;
+    const day = this.dayOf(user, now);
+    let left = ms;
+    for (const from of ['away', 'idle']) {
+      const moved = Math.min(day[from], left);
+      day[from] -= moved;
+      left -= moved;
+    }
+    day[kind] += ms;
+    if (kind !== 'break') this.recordWork(user, `${AWAY_ANSWERS[kind]} away from the desk, ${callLength(Math.round(ms / 1000))}`, conn.app, now);
+    return true;
+  }
+
+  endAwaySpell(user, now) {
+    if (!user.awaySpell) return;
+    user.lastAwaySpell = user.awaySpell;
+    user.lastAwayEnd = now;
+    user.awaySpell = 0;
+  }
+
   // Sent by a tab the moment someone touches it after a quiet spell, so the status updates at once.
   input(connId, now) {
     const user = this.userOf(connId);
-    if (user?.loggedIn) this.noteInput(user, now, this.connections.get(connId).app);
+    const conn = this.connections.get(connId);
+    if (user?.loggedIn && !conn.lockedAt) this.noteInput(user, now, conn.app);
   }
 
   // Real work: an application opened, a note saved, a status changed. In production these would
@@ -238,7 +346,10 @@ class ActivityTracker {
   work(connId, label, now) {
     const user = this.userOf(connId);
     if (!user?.loggedIn) return;
-    const { app } = this.connections.get(connId);
+    this.recordWork(user, label, this.connections.get(connId).app, now);
+  }
+
+  recordWork(user, label, app, now) {
     user.lastWorkAt = now;
     user.lastWork = String(label || 'Work').slice(0, 80);
     user.lastWorkApp = app;
@@ -259,7 +370,9 @@ class ActivityTracker {
     const user = this.userOf(connId);
     if (!user?.loggedIn) return;
     if (MANUAL_STATES.includes(kind)) {
+      // Choosing a status by hand also takes over a call that was detected automatically.
       if (user.manual?.kind !== kind) user.manual = { kind, since: now };
+      else if (user.manual.auto) user.manual = { kind, since: user.manual.since };
     } else if (kind === null || kind === '' || kind === 'auto') {
       if (user.manual) this.endManual(user, now);
     } else {
@@ -339,11 +452,20 @@ class ActivityTracker {
   stateOf(user, now) {
     if (!user.loggedIn) return 'logged_out';
     if (user.manual) return user.manual.kind;
-    if (user.conns.size === 0) return 'away';
+    if (user.conns.size === 0 || this.screenLocked(user)) return 'away';
     // Someone who has gone quiet is Idle, however recently they saved something.
     if (now - user.lastInputAt >= this.config.presence * 1000) return 'idle';
     if (user.lastWorkAt && now - user.lastWorkAt < this.config.work * 1000) return 'working';
     return 'active';
+  }
+
+  // A desktop app reports the screen locked, and nothing has been touched on any device since.
+  screenLocked(user) {
+    for (const connId of user.conns) {
+      const lockedAt = this.connections.get(connId)?.lockedAt;
+      if (lockedAt && user.lastInputAt <= lockedAt) return true;
+    }
+    return false;
   }
 
   // How long the idle-logout clock has been running: since the last input, or since a call/meeting/break ended.
@@ -364,8 +486,17 @@ class ActivityTracker {
     const timelineStart = now - this.config.timelineWindow * 1000;
     for (const user of this.users.values()) {
       if (!user.lastTick) continue;
+      // A detected call ends when the desktop app that saw the microphone is gone: nothing can confirm it any more.
+      if (user.manual?.auto && !this.connections.has(user.manual.connId)) this.endManual(user, now);
       const state = this.stateOf(user, now);
       const from = user.lastTick;
+      if (state !== user.lastState) {
+        user.lastState = state;
+        user.stateSince = from;
+      }
+      // Away spells, measured here so that "what was it?" answers can be checked against them.
+      if (AWAY_STATES.has(state)) user.awaySpell += now - from;
+      else this.endAwaySpell(user, now);
       if (state !== 'logged_out') user.totals[state] += now - from;
       // The day record is the one this second started in, so local midnight splits cleanly.
       if (!user.bot && state !== 'logged_out') {
@@ -388,7 +519,8 @@ class ActivityTracker {
       if (!user.loggedIn) continue;
 
       if (user.manual) {
-        if (now - user.manual.since >= this.config.manualMax * 1000) this.endManual(user, now);
+        // A chosen status ends by itself after the safety limit; a detected call lasts while the microphone is in use.
+        if (!user.manual.auto && now - user.manual.since >= this.config.manualMax * 1000) this.endManual(user, now);
         continue;
       }
       const quietMs = this.quietMs(user, now);
@@ -448,7 +580,9 @@ class ActivityTracker {
       if (!conn) continue;
       const device = devices.get(conn.deviceId) || { label: conn.deviceLabel, tabs: 0, apps: [] };
       device.tabs++;
-      if (!device.apps.includes(conn.app)) device.apps.push(conn.app);
+      if (conn.app && !device.apps.includes(conn.app)) device.apps.push(conn.app);
+      if (conn.desktop) device.desktop = true;
+      if (conn.lockedAt) device.locked = true;
       devices.set(conn.deviceId, device);
     }
     for (const device of devices.values()) device.apps.sort();
@@ -461,11 +595,14 @@ class ActivityTracker {
       devices: [...devices.values()],
       secondsSinceInput: user.loggedIn ? Math.round((now - user.lastInputAt) / 1000) : null,
       secondsUntilLogout: user.loggedIn ? this.secondsUntilLogout(user, now) : null,
+      // A detected call says which app and has no end time: it lasts while the microphone is in use.
       manual: user.manual && {
         kind: user.manual.kind,
         seconds: Math.round((now - user.manual.since) / 1000),
-        endsIn: Math.max(0, Math.ceil((this.config.manualMax * 1000 - (now - user.manual.since)) / 1000))
+        endsIn: user.manual.auto ? null : Math.max(0, Math.ceil((this.config.manualMax * 1000 - (now - user.manual.since)) / 1000)),
+        ...(user.manual.auto && { detected: true, app: user.manual.app })
       },
+      trackerStopped: user.trackerStopped,
       lastWork: user.lastWork,
       lastWorkApp: user.lastWorkApp,
       // Time in use (working or active) per app today, most-used first.
@@ -480,6 +617,39 @@ class ActivityTracker {
       blocks: this.blocksOf(user, now),
       segments: user.segments
     };
+  }
+
+  // One line on the manager's list: small enough to work out for thousands of people every second.
+  // The full picture (summary) is only sent for the person a manager has opened.
+  row(user, now) {
+    const state = this.stateOf(user, now);
+    const today = this.peekDay(user, now);
+    const atComputer = Math.round(AT_COMPUTER.reduce((sum, key) => sum + today[key], 0) / 1000);
+    const flags = [];
+    if (this.noWorkFor(user, state, now)) flags.push('noWork');
+    if (this.tooRegular(user, now)) flags.push('regular');
+    if (user.trackerStopped) flags.push('stopped');
+    const inUse = state === 'working' || state === 'active';
+    return {
+      id: user.id, name: user.name, team: user.team, office: user.office, timeZone: user.timeZone, state,
+      since: user.stateSince ? Math.max(0, Math.round((now - user.stateSince) / 1000)) : null,
+      app: user.manual?.auto ? user.manual.app : inUse ? user.lastApp : null,
+      activity: percent(today.activeSeconds, atComputer),
+      work: today.work,
+      flags
+    };
+  }
+
+  rows(now) {
+    const rows = [];
+    for (const user of this.users.values()) if (!user.bot) rows.push(this.row(user, now));
+    return rows;
+  }
+
+  // The full picture of one employee for the manager's detail panel, or null for unknown ids and load-test bots.
+  detail(id, now) {
+    const user = this.users.get(id);
+    return user && !user.bot ? { ...this.summary(user, now), team: user.team } : null;
   }
 
   // What the manager screen shows. Load-test users are only counted.
@@ -528,7 +698,7 @@ class ActivityTracker {
       work: add('work'),
       callsAndMeetings: add('callsAndMeetings'),
       breaks: add('breaks'),
-      flaggedPeople: employees.filter(row => row.flagged.noWork || row.flagged.regular).length
+      flaggedPeople: employees.filter(row => row.flagged.noWork || row.flagged.regular || row.flagged.trackerStops).length
     };
     team.activity = percent(team.activeSeconds, team.atComputer);
     return { range, now, employees, team, sample: employees.some(row => row.sample) };
@@ -607,7 +777,7 @@ function reportRow(user, days) {
     firstSeen: seen.length ? Math.min(...seen.map(({ day }) => day.firstSeen)) : null,
     lastSeen: seen.length ? Math.max(...seen.map(({ day }) => day.lastSeen)) : null,
     daysActive: seen.length,
-    flagged: { noWork: seconds(sum('noWorkFlag')), regular: seconds(sum('regularFlag')) },
+    flagged: { noWork: seconds(sum('noWorkFlag')), regular: seconds(sum('regularFlag')), trackerStops: sum('trackerStops') },
     sample: days.some(({ day }) => day.sample),
     days: days.map(({ key, day }) => {
       const dayComputer = seconds(AT_COMPUTER.reduce((total, state) => total + day[state], 0));
